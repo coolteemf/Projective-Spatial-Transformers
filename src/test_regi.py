@@ -1,4 +1,5 @@
 from __future__ import print_function
+from module_vit import RegiNet_CrossViTv2_SW
 import torch
 import torch.nn as nn
 import torch.optim as optim
@@ -22,7 +23,7 @@ ITER_STEPS = 500
 MANUAL_TEST = False
 
 SE3_GROUP = SpecialEuclidean(n=3)
-METRIC = SE3_GROUP.left_canonical_metric
+METRIC = SE3_GROUP.default_metric()
 
 CT_PATH = '../data/CT128.nii'
 SEG_PATH = '../data/CTSeg128.nii'
@@ -45,10 +46,10 @@ def train():
     param, det_size, _3D_vol, CT_vol, ray_proj_mov, corner_pt, norm_factor = input_param(CT_PATH, SEG_PATH, BATCH_SIZE, VOX_SPAC, zFlip)
 
     initmodel = ProST_init(param).to(device)
-    model = RegiNet(param, det_size).to(device)
+    model = RegiNet_CrossViTv2_SW().to(device)
 
-    checkpoint = torch.load(RESUME_MODEL)
-    model.load_state_dict(checkpoint['state_dict'])
+    # checkpoint = torch.load(RESUME_MODEL)
+    # model.load_state_dict(checkpoint['state_dict'])
 
 
     model.eval()
@@ -103,7 +104,7 @@ def train():
             break
 
         # Do Projection
-        encode_mov, encode_tar, proj_mov = model(_3D_vol, target, rtvec, corner_pt)
+        encode_mov, encode_tar, proj_mov = model(_3D_vol, target, rtvec, corner_pt, param)
 
         optimizer_net.zero_grad()
         optimizer_gradncc.zero_grad()

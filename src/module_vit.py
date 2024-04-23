@@ -1,4 +1,5 @@
-from vit_pytorch.cross_vit import CrossViT
+from vit_pytorch.cross_vit import MultiScaleEncoder, Rearrange
+from einops import repeat
 import ProSTGrid
 import torch
 import torch.nn as nn
@@ -14,6 +15,113 @@ def transform_nan_check(dist_min, dist_max, transform_mat4x4, transform_mat3x4):
         return False
     else:
         return True
+
+# Copied from vit_pytorch.cross_vit.py and modified to fix patch dim assuming input channels = 3, where it should be 2 here
+
+class ImageEmbedder(nn.Module):
+    def __init__(
+        self,
+        *,
+        dim,
+        image_size,
+        patch_size,
+        dropout = 0.
+    ):
+        super().__init__()
+        n_channels = 2
+        assert image_size % patch_size == 0, 'Image dimensions must be divisible by the patch size.'
+        num_patches = (image_size // patch_size) ** 2
+        patch_dim = n_channels * patch_size ** 2
+
+        self.to_patch_embedding = nn.Sequential(
+            Rearrange('b c (h p1) (w p2) -> b (h w) (p1 p2 c)', p1 = patch_size, p2 = patch_size),
+            nn.LayerNorm(patch_dim),
+            nn.Linear(patch_dim, dim),
+            nn.LayerNorm(dim)
+        )
+
+        self.pos_embedding = nn.Parameter(torch.randn(1, num_patches + 1, dim))
+        self.cls_token = nn.Parameter(torch.randn(1, 1, dim))
+        self.dropout = nn.Dropout(dropout)
+
+    def forward(self, img):
+        x = self.to_patch_embedding(img)
+        b, n, _ = x.shape
+
+        cls_tokens = repeat(self.cls_token, '() n d -> b n d', b = b)
+        x = torch.cat((cls_tokens, x), dim=1)
+        x += self.pos_embedding[:, :(n + 1)]
+
+        return self.dropout(x)
+
+# Copied from vit_pytorch.cross_vit.py
+
+class CrossViT(nn.Module):
+    def __init__(
+        self,
+        *,
+        image_size,
+        num_classes,
+        sm_dim,
+        lg_dim,
+        sm_patch_size = 12,
+        sm_enc_depth = 1,
+        sm_enc_heads = 8,
+        sm_enc_mlp_dim = 2048,
+        sm_enc_dim_head = 64,
+        lg_patch_size = 16,
+        lg_enc_depth = 4,
+        lg_enc_heads = 8,
+        lg_enc_mlp_dim = 2048,
+        lg_enc_dim_head = 64,
+        cross_attn_depth = 2,
+        cross_attn_heads = 8,
+        cross_attn_dim_head = 64,
+        depth = 3,
+        dropout = 0.1,
+        emb_dropout = 0.1
+    ):
+        super().__init__()
+        self.sm_image_embedder = ImageEmbedder(dim = sm_dim, image_size = image_size, patch_size = sm_patch_size, dropout = emb_dropout)
+        self.lg_image_embedder = ImageEmbedder(dim = lg_dim, image_size = image_size, patch_size = lg_patch_size, dropout = emb_dropout)
+
+        self.multi_scale_encoder = MultiScaleEncoder(
+            depth = depth,
+            sm_dim = sm_dim,
+            lg_dim = lg_dim,
+            cross_attn_heads = cross_attn_heads,
+            cross_attn_dim_head = cross_attn_dim_head,
+            cross_attn_depth = cross_attn_depth,
+            sm_enc_params = dict(
+                depth = sm_enc_depth,
+                heads = sm_enc_heads,
+                mlp_dim = sm_enc_mlp_dim,
+                dim_head = sm_enc_dim_head
+            ),
+            lg_enc_params = dict(
+                depth = lg_enc_depth,
+                heads = lg_enc_heads,
+                mlp_dim = lg_enc_mlp_dim,
+                dim_head = lg_enc_dim_head
+            ),
+            dropout = dropout
+        )
+
+        self.sm_mlp_head = nn.Sequential(nn.LayerNorm(sm_dim), nn.Linear(sm_dim, num_classes))
+        self.lg_mlp_head = nn.Sequential(nn.LayerNorm(lg_dim), nn.Linear(lg_dim, num_classes))
+
+    def forward(self, img):
+        sm_tokens = self.sm_image_embedder(img)
+        lg_tokens = self.lg_image_embedder(img)
+
+        sm_tokens, lg_tokens = self.multi_scale_encoder(sm_tokens, lg_tokens)
+
+        sm_cls, lg_cls = map(lambda t: t[:, 0], (sm_tokens, lg_tokens))
+
+        sm_logits = self.sm_mlp_head(sm_cls)
+        lg_logits = self.lg_mlp_head(lg_cls)
+
+        return sm_logits + lg_logits
 
 
 class RegiNet_CrossViTv2_SW(nn.Module):
@@ -41,7 +149,7 @@ class RegiNet_CrossViTv2_SW(nn.Module):
 
         self._2Dconv_encode = CrossViT(
                                 image_size = 128,
-                                channels = 2,
+                                # channels = 2,
                                 num_classes = 1000,
                                 depth = 3,
                                 sm_dim = 16,            # high res dimension
