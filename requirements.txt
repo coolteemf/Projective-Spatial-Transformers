@@ -16,3 +16,5 @@ torch
 torchgeometry
 torchvision
 tqdm
+vit_pytorch
+einops
