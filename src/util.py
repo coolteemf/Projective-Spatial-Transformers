@@ -216,6 +216,48 @@ def input_param(CT_PATH, SEG_PATH, BATCH_SIZE, ISFlip = False, zRot90 = False, p
 
     return param, det_size, _3D_vol, CT_vol, ray_proj_mov, corner_pt, norm_factor
 
+def input_param_test(SEG_PATH, BATCH_SIZE, ISFlip = False, zRot90 = False, 
+                     pix_spacing = 2.92, step_size = 1.75, iso_center = 400, norm_ct = False, device='cuda'):
+    _3D_vol_nib = nib.load(SEG_PATH)
+    _3D_vol = np.asanyarray(_3D_vol_nib.dataobj)
+
+    vol_affine = _3D_vol_nib.affine
+    # Currently assume volume spacing is isotropic
+    # assert(abs(vol_affine[0][0]) == abs(vol_affine[1][1]) == abs(vol_affine[2][2]))
+    vol_spacing = abs(vol_affine[0][0])
+
+    # Rotation 90 degrees for making an AP view projection
+    if zRot90:
+        _3D_vol = np.rot90(_3D_vol, 3)
+
+    if ISFlip:
+        _3D_vol = np.flip(_3D_vol, axis=2)
+
+    # Normalize CT
+    if norm_ct:
+        _3D_vol = (_3D_vol - np.min(_3D_vol)) / (np.max(_3D_vol) - np.min(_3D_vol))
+
+    # Pre-defined hard coded geometry
+    src_det = 1483.39
+    det_size = 704
+    # vol_size = CT_vol.shape[0]
+    depth, height, width = _3D_vol.shape
+
+    norm_factor = (depth * vol_spacing / 2)
+    src = (src_det - iso_center) / norm_factor
+    det = -iso_center / norm_factor
+    pix_spacing = pix_spacing / norm_factor
+    step_size = step_size / norm_factor
+
+    param = [src, det, pix_spacing, step_size, det_size]
+
+    _3D_vol = tensor_exp2torch(_3D_vol, BATCH_SIZE, device)
+    corner_pt = create_cornerpt(BATCH_SIZE, depth, height, width, device)
+    ray_proj_mov = np.zeros((det_size, det_size))
+    ray_proj_mov = tensor_exp2torch(ray_proj_mov, BATCH_SIZE, device)
+
+    return param, det_size, _3D_vol, ray_proj_mov, corner_pt, norm_factor
+
 def norm_target(BATCH_SIZE, det_size, target):
     min_tar, _ = torch.min(target.reshape(BATCH_SIZE, -1), dim=-1, keepdim=True)
     max_tar, _ = torch.max(target.reshape(BATCH_SIZE, -1), dim=-1, keepdim=True)

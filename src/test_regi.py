@@ -9,10 +9,12 @@ import numpy as np
 from torch.optim.lr_scheduler import StepLR, CyclicLR
 
 from module import RegiNet, ProST_init, Pelvis_Dataset
-from util import gradncc, init_rtvec_test, input_param
+from util import gradncc, init_rtvec_test, input_param, input_param_test
 from util_plot import plot_test_iter_comb
 
 from geomstats.geometry.special_euclidean import SpecialEuclidean
+
+import cv2 as cv
 
 device = torch.device("cuda")
 PI = 3.1415926
@@ -25,9 +27,10 @@ MANUAL_TEST = False
 SE3_GROUP = SpecialEuclidean(n=3)
 METRIC = SE3_GROUP.default_metric()
 
-CT_PATH = '../data/CT128.nii'
-SEG_PATH = '../data/CTSeg128.nii'
-VOX_SPAC = 2.33203125
+# CT_PATH = '/home/francois/Projects/data/raw_data/4D_Liver_paired/42 CT VPCT  DynMulti4D  0.6  B20f - 38 frames Volume Sequence by AcquisitionTime 16.nii.gz'
+SEG_PATH = '/home/francois/Projects/data/raw_data/4D_Liver_paired/42VPCT_16_bonemask_resample.nii.gz'
+VOX_SPAC = 0.7421875
+PIX_SPAC = 0.388
 
 SAVE_PATH = '../data/save_model'
 RESUME_EPOCH = 90
@@ -43,13 +46,14 @@ RESUME_MODEL = SAVE_PATH+'/pretrain.pt'
 def train():
     criterion_mse = nn.MSELoss()
     criterion_gradncc = gradncc
-    param, det_size, _3D_vol, CT_vol, ray_proj_mov, corner_pt, norm_factor = input_param(CT_PATH, SEG_PATH, BATCH_SIZE, VOX_SPAC, zFlip)
+    param, det_size, _3D_vol, ray_proj_mov, corner_pt, norm_factor = input_param_test(SEG_PATH, BATCH_SIZE, VOX_SPAC, zFlip,
+                                                                                      pix_spacing=PIX_SPAC)
 
     initmodel = ProST_init(param).to(device)
-    model = RegiNet_CrossViTv2_SW().to(device)
+    model = RegiNet(param, det_size).to(device)
 
-    # checkpoint = torch.load(RESUME_MODEL)
-    # model.load_state_dict(checkpoint['state_dict'])
+    checkpoint = torch.load(RESUME_MODEL)
+    model.load_state_dict(checkpoint['state_dict'])
 
 
     model.eval()
@@ -71,7 +75,9 @@ def train():
                                                            manual_rtvec_smp=manual_rtvec_smp)
 
     with torch.no_grad():
-        target = initmodel(CT_vol, ray_proj_mov, transform_mat3x4_gt, corner_pt)
+        # target = initmodel(CT_vol, ray_proj_mov, transform_mat3x4_gt, corner_pt)
+        target = torch.as_tensor(
+            cv.cvtColor(cv.imread("/home/francois/Projects/data/raw_data/4D_Liver_paired/27XA_67_crop.png"), cv.COLOR_BGR2GRAY) / 255)
         min_tar, _ = torch.min(target.reshape(BATCH_SIZE, -1), dim=-1, keepdim=True)
         max_tar, _ = torch.max(target.reshape(BATCH_SIZE, -1), dim=-1, keepdim=True)
         target = (target.reshape(BATCH_SIZE, -1) - min_tar) / (max_tar - min_tar)
@@ -104,7 +110,7 @@ def train():
             break
 
         # Do Projection
-        encode_mov, encode_tar, proj_mov = model(_3D_vol, target, rtvec, corner_pt, param)
+        encode_mov, encode_tar, proj_mov = model(_3D_vol, target, rtvec, corner_pt)
 
         optimizer_net.zero_grad()
         optimizer_gradncc.zero_grad()
