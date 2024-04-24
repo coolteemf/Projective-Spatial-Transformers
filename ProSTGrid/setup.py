@@ -7,7 +7,9 @@ setup(
         CUDAExtension('ProSTGrid', [
             'ProSTGrid.cpp',
             'ProSTGrid_kernel.cu',
-        ]),
+        ],
+        extra_compile_args={"nvcc": ["-ccbin=/usr/local/cuda/bin/gcc"]}
+                      ),
     ],
     cmdclass={
         'build_ext': BuildExtension
