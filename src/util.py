@@ -14,6 +14,13 @@ from posevec2mat import euler2mat
 PI = 3.1415926
 criterion = nn.MSELoss()
 
+def free_memory():
+    import gc
+    if torch.cuda.is_available():
+        torch._C._cuda_clearCublasWorkspaces()
+    gc.collect()
+    if torch.cuda.is_available():
+        torch.cuda.empty_cache()
 
 def rotation_matrix_to_quaternion(rotation_matrix, eps=1e-6):
     """Convert 3x4 rotation matrix to 4d quaternion vector
@@ -239,7 +246,7 @@ def input_param_test(SEG_PATH, BATCH_SIZE, ISFlip = False, zRot90 = False,
 
     # Pre-defined hard coded geometry
     src_det = 1483.39
-    det_size = 704
+    det_size = 128
     # vol_size = CT_vol.shape[0]
     depth, height, width = _3D_vol.shape
 
@@ -478,10 +485,20 @@ def create_cornerpt(BATCH_SIZE, depth, height, width, device):
 
 def _repeat(x, n_repeats):
     with torch.no_grad():
-        rep = torch.ones((1, n_repeats), dtype=torch.float32).cuda()
+        rep = torch.ones((1, n_repeats), dtype=x.dtype, device=x.device)
 
     return torch.matmul(x.view(-1, 1), rep).view(-1)
 
+def loop_interpolate(vol, grid):
+    # Assume CT to be Nx1xDxHxW
+    num_batch, channels, depth, height, width = vol.shape
+    # iterate through channels
+    interpolated_vol = torch.stack(
+        [
+            _bilinear_interpolate_no_torch_5D(vol[:, slice(i, i+1)], grid) 
+         for i in range(channels)], dim=1
+    )
+    return interpolated_vol
 
 def _bilinear_interpolate_no_torch_5D(vol, grid):
     # Assume CT to be Nx1xDxHxW
@@ -521,7 +538,48 @@ def _bilinear_interpolate_no_torch_5D(vol, grid):
     dim1 = float(depth * width * height)
     dim1_out = float(out_depth * out_width * out_height)
 
-    base = _repeat(torch.arange(start=0, end=num_batch, dtype=torch.float32).cuda() * dim1, np.int32(dim1_out))
+    # Ia, Ib, Ic, Id, Ie, If, Ig, Ih = _get_interpolate_indices(vol, num_batch, channels, x0, x1, y0, y1, z0, z1, dim3, dim2, dim1, dim1_out)
+    interpolated_vol = torch.zeros((np.prod((num_batch, out_depth, out_height, out_width)), channels),
+                                   dtype=grid.dtype, device=grid.device)
+    base = _repeat(torch.arange(start=0, end=num_batch, dtype=grid.dtype, device=grid.device) * dim1, np.int32(dim1_out))
+    im_flat = vol.contiguous().view(-1, channels)
+
+    i = 0
+    for els in [[x1, x, y1, y, z1, z, z0, y0, x0],
+                [x, x0, y1, y, z1, z, z0, y0, x1],
+                [x1, x, y, y0, z1, z, z0, y1, x0],
+                [x, x0, y, y0, z1, z, z0, y1, x1],
+                [x1, x, y1, y, z, z0, z1, y0, x0],
+                [x, x0, y1, y, z, z0, z1, y0, x1],
+                [x1, x, y, y0, z, z0, z1, y1, x0],
+                [x, x0, y, y0, z, z0, z1, y1, x1]]:
+        # i+=1
+        # print(i)
+        # free_memory()
+        interpolated_vol += torch.mul(torch.mul(torch.mul(els[0] - els[1], 
+                                                          els[2] - els[3]),
+                                                els[4] - els[5]).view(-1, 1), 
+                                      _get_interpol_vol(base, im_flat, channels, dim2, dim3, els[6], els[7], els[8]))
+    
+    # wa = torch.mul(torch.mul(x1 - x, y1 - y), z1 - z).view(-1, 1)
+    # wb = torch.mul(torch.mul(x - x0, y1 - y), z1 - z).view(-1, 1)
+    # wc = torch.mul(torch.mul(x1 - x, y - y0), z1 - z).view(-1, 1)
+    # wd = torch.mul(torch.mul(x - x0, y - y0), z1 - z).view(-1, 1)
+    # we = torch.mul(torch.mul(x1 - x, y1 - y), z - z0).view(-1, 1)
+    # wf = torch.mul(torch.mul(x - x0, y1 - y), z - z0).view(-1, 1)
+    # wg = torch.mul(torch.mul(x1 - x, y - y0), z - z0).view(-1, 1)
+    # wh = torch.mul(torch.mul(x - x0, y - y0), z - z0).view(-1, 1)
+
+    # interpolated_vol = torch.mul(wa, Ia) + torch.mul(wb, Ib) + torch.mul(wc, Ic) + torch.mul(wd, Id) +\
+    #                    torch.mul(we, Ie) + torch.mul(wf, If) + torch.mul(wg, Ig) + torch.mul(wh, Ih)
+    interpolated_vol[ind] = 0.0
+    interpolated_vol = interpolated_vol.view(num_batch, out_depth, out_height, out_width, channels)
+    interpolated_vol = interpolated_vol.permute(0, 4, 1, 2, 3)
+
+    return interpolated_vol
+
+def _get_interpolate_indices(vol, num_batch, channels, x0, x1, y0, y1, z0, z1, dim3, dim2, dim1, dim1_out):
+    base = _repeat(torch.arange(start=0, end=num_batch, dtype=torch.float32, device=vol.device) * dim1, np.int32(dim1_out))
     idx_a = base.long() + (z0*dim2).long() + (y0*dim3).long() + x0.long()
     idx_b = base.long() + (z0*dim2).long() + (y0*dim3).long() + x1.long()
     idx_c = base.long() + (z0*dim2).long() + (y1*dim3).long() + x0.long()
@@ -541,24 +599,11 @@ def _bilinear_interpolate_no_torch_5D(vol, grid):
     If = im_flat[idx_f].view(-1, channels)
     Ig = im_flat[idx_g].view(-1, channels)
     Ih = im_flat[idx_h].view(-1, channels)
+    return Ia,Ib,Ic,Id,Ie,If,Ig,Ih
 
-    wa = torch.mul(torch.mul(x1 - x, y1 - y), z1 - z).view(-1, 1)
-    wb = torch.mul(torch.mul(x - x0, y1 - y), z1 - z).view(-1, 1)
-    wc = torch.mul(torch.mul(x1 - x, y - y0), z1 - z).view(-1, 1)
-    wd = torch.mul(torch.mul(x - x0, y - y0), z1 - z).view(-1, 1)
-    we = torch.mul(torch.mul(x1 - x, y1 - y), z - z0).view(-1, 1)
-    wf = torch.mul(torch.mul(x - x0, y1 - y), z - z0).view(-1, 1)
-    wg = torch.mul(torch.mul(x1 - x, y - y0), z - z0).view(-1, 1)
-    wh = torch.mul(torch.mul(x - x0, y - y0), z - z0).view(-1, 1)
-
-    interpolated_vol = torch.mul(wa, Ia) + torch.mul(wb, Ib) + torch.mul(wc, Ic) + torch.mul(wd, Id) +\
-                       torch.mul(we, Ie) + torch.mul(wf, If) + torch.mul(wg, Ig) + torch.mul(wh, Ih)
-    interpolated_vol[ind] = 0.0
-    interpolated_vol = interpolated_vol.view(num_batch, out_depth, out_height, out_width, channels)
-    interpolated_vol = interpolated_vol.permute(0, 4, 1, 2, 3)
-
-    return interpolated_vol
-
+def _get_interpol_vol(base, im_flat, channels, dim2, dim3, _z, _y, _x):
+    idx = base.long() + (_z*dim2).long() + (_y*dim3).long() + _x.long()
+    return im_flat[idx].view(-1, channels)
 
 def cal_ncc(I, J, eps):
     # compute local sums via convolution

@@ -1,4 +1,5 @@
 from __future__ import print_function
+import os
 from module_vit import RegiNet_CrossViTv2_SW
 import torch
 import torch.nn as nn
@@ -15,6 +16,7 @@ from util_plot import plot_test_iter_comb
 from geomstats.geometry.special_euclidean import SpecialEuclidean
 
 import cv2 as cv
+os.environ["CUDA_LAUNCH_BLOCKING"] = "1" # fixes a "misaligned address" CUDA bug
 
 device = torch.device("cuda")
 PI = 3.1415926
@@ -28,11 +30,11 @@ SE3_GROUP = SpecialEuclidean(n=3)
 METRIC = SE3_GROUP.default_metric()
 
 # CT_PATH = '/home/francois/Projects/data/raw_data/4D_Liver_paired/42 CT VPCT  DynMulti4D  0.6  B20f - 38 frames Volume Sequence by AcquisitionTime 16.nii.gz'
-SEG_PATH = '/home/francois/Projects/data/raw_data/4D_Liver_paired/42VPCT_16_bonemask_resample.nii.gz'
+SEG_PATH = '/home/francois/Projects/data/raw_data/4D_Liver_paired/42VPCT_16_bonemask_resample2.nii.gz'
 VOX_SPAC = 0.7421875
 PIX_SPAC = 0.388
 
-SAVE_PATH = '../data/save_model'
+SAVE_PATH = '/home/francois/Projects/Projective-Spatial-Transformers/data/save_model'
 RESUME_EPOCH = 90
 lr_net = 0.01
 lr_gradncc = 0.002
@@ -47,7 +49,7 @@ def train():
     criterion_mse = nn.MSELoss()
     criterion_gradncc = gradncc
     param, det_size, _3D_vol, ray_proj_mov, corner_pt, norm_factor = input_param_test(SEG_PATH, BATCH_SIZE, VOX_SPAC, zFlip,
-                                                                                      pix_spacing=PIX_SPAC)
+                                                                                      pix_spacing=PIX_SPAC, device=device)
 
     initmodel = ProST_init(param).to(device)
     model = RegiNet(param, det_size).to(device)
@@ -77,7 +79,9 @@ def train():
     with torch.no_grad():
         # target = initmodel(CT_vol, ray_proj_mov, transform_mat3x4_gt, corner_pt)
         target = torch.as_tensor(
-            cv.cvtColor(cv.imread("/home/francois/Projects/data/raw_data/4D_Liver_paired/27XA_67_crop.png"), cv.COLOR_BGR2GRAY) / 255)
+            cv.cvtColor(cv.imread("/home/francois/Projects/data/raw_data/4D_Liver_paired/27XA_67_crop.png"), cv.COLOR_BGR2GRAY) / 255,
+            dtype=torch.float32, device=device)
+        target = torch.nn.functional.interpolate(target.unsqueeze(0).unsqueeze(0), size=(128, 128), mode='bilinear').squeeze()
         min_tar, _ = torch.min(target.reshape(BATCH_SIZE, -1), dim=-1, keepdim=True)
         max_tar, _ = torch.max(target.reshape(BATCH_SIZE, -1), dim=-1, keepdim=True)
         target = (target.reshape(BATCH_SIZE, -1) - min_tar) / (max_tar - min_tar)

@@ -2,7 +2,7 @@ import torch
 import ProSTGrid
 import torch.nn as nn
 import numpy as np
-from util import _bilinear_interpolate_no_torch_5D
+from util import _bilinear_interpolate_no_torch_5D, loop_interpolate
 import torchgeometry as tgm
 from PIL import Image
 from torch.utils.data import Dataset, DataLoader
@@ -256,6 +256,7 @@ class RegiNet(nn.Module):
         BATCH_SIZE = theta.size()[0]
         H = y.size()[2]
         W = y.size()[3]
+        y = y.to(x)
 
         transform_mat4x4 = tgm.rtvec_to_pose(theta)
         transform_mat3x4 = transform_mat4x4[:, :3, :]
@@ -263,11 +264,12 @@ class RegiNet(nn.Module):
 
         grid = ProSTGrid.forward(corner_pt, y.size(), dist_min.data, dist_max.data,\
                                      self.src, self.det, self.pix_spacing, self.step_size, False)
+        grid = grid.reshape(BATCH_SIZE, -1, 4)
         grid_trans = grid.bmm(transform_mat3x4.transpose(1,2)).view(BATCH_SIZE, H, W, -1, 3)
-        x_3d = _bilinear_interpolate_no_torch_5D(x_3d, grid_trans)
+        x_3d = loop_interpolate(x_3d, grid_trans).squeeze(2)
         x_2d = torch.sum(x_3d, dim=-1)
 
-        x_3d_ad = _bilinear_interpolate_no_torch_5D(x, grid_trans)
+        x_3d_ad = loop_interpolate(x, grid_trans).squeeze(2)
         x_2d_ad = torch.sum(x_3d_ad, dim=-1)
 
         y_out = self._2Dconv_encode_y(y)
