@@ -1,5 +1,7 @@
 from __future__ import print_function
 import os
+import uuid
+import datetime
 from module_vit import RegiNet_CrossViTv2_SW
 import torch
 import torch.nn as nn
@@ -7,13 +9,14 @@ import torch.optim as optim
 import matplotlib.pyplot as plt
 import time
 import argparse
+from tqdm import tqdm
 
 import numpy as np
 from torch.optim.lr_scheduler import StepLR, CyclicLR
 
 from module import RegiNet, ProST_init, Pelvis_Dataset
 from util import gradncc, init_rtvec_test, input_param, input_param_test
-from util_plot import plot_test_iter_comb
+from util_plot import plot_test_iter_comb, create_video_from_figs, save_test_animation_comb
 
 from geomstats.geometry.special_euclidean import SpecialEuclidean
 
@@ -134,6 +137,26 @@ def train():
     network_sim_list = []
     gradncc_sim_list = []
     rtvec_diff_list = []
+    
+    # Lists to store variables during iterations
+    stored_proj_mov = []
+    stored_rtvec = []
+    stored_encode_mov = []
+    stored_encode_tar = []
+    
+    # Create a unique ID for this test run
+    test_id = datetime.datetime.now().strftime("%Y%m%d_%H%M%S") + "_" + str(uuid.uuid4())[:8]
+    
+    # Create necessary directories for saving outputs
+    movie_dir = os.path.join(SAVE_PATH, 'movie')
+    if not os.path.exists(movie_dir):
+        os.makedirs(movie_dir)
+        print(f"Created directory: {movie_dir}")
+    
+    iterfig_dir = os.path.join(movie_dir, f'iterfigs_{test_id}')
+    if not os.path.exists(iterfig_dir):
+        os.makedirs(iterfig_dir)
+        print(f"Created directory: {iterfig_dir}")
 
     stop = False
     switch = False
@@ -142,7 +165,7 @@ def train():
         total_backward_time = 0
     
     print("Starting iterations...")
-    for iter in range(ITER_STEPS):
+    for iter in tqdm(range(ITER_STEPS), desc="Network iterations"):
         if ENABLE_TIMING:
             iter_start_time = time.time()
         
@@ -163,6 +186,12 @@ def train():
         if ENABLE_TIMING:
             forward_start_time = time.time()
         encode_mov, encode_tar, proj_mov = model(_3D_vol, target, rtvec, corner_pt)
+        
+        # Store variables for later visualization
+        stored_proj_mov.append(proj_mov.detach().clone())
+        stored_rtvec.append(rtvec.detach().clone())
+        stored_encode_mov.append(encode_mov.detach().clone())
+        stored_encode_tar.append(encode_tar.detach().clone())
         if ENABLE_TIMING:
             forward_time = time.time() - forward_start_time
             total_forward_time += forward_time
@@ -201,8 +230,9 @@ def train():
 
         if iter == 0:
             proj_init_numpy0 = np.array(proj_mov[0,0,:,:].data.cpu())
-        # plot_test_iter_comb(fig, proj_mov, proj_init_numpy0, target, det_size, norm_factor,\
-        #        network_sim_list, gradncc_sim_list, rtvec_diff_list, switch)
+
+        # We no longer save visualizations during iterations - will do it in a separate loop later
+        
         if ENABLE_TIMING:
             print(f"Iteration {iter} completed in {time.time() - iter_start_time:.4f} seconds")
             print(f"Forward pass time: {forward_time:.4f} seconds")
@@ -222,6 +252,47 @@ def train():
         print("----------------------")
     else:
         print("\n Completed")
+
+    # Generate all visualizations in a separate loop with progress bar
+    print("\nGenerating visualizations...")
+    for iter in tqdm(range(len(stored_proj_mov)), desc="Generating plots"):
+        # Get the data for this iteration
+        proj_mov = stored_proj_mov[iter]
+        rtvec = stored_rtvec[iter]
+        
+        # Determine if switched to gradncc at this point
+        iter_switch = False
+        if iter > 10:  # Same condition as in the main loop
+            network_sim_list_np = np.array(network_sim_list[:iter+1])
+            iter_switch = np.std(network_sim_list_np[-10:]) < switch_trd
+        
+        # Save the visualization for this iteration
+        save_test_animation_comb(fig, SAVE_PATH, iter, test_id, proj_mov, proj_init_numpy0, target, det_size, norm_factor,
+                                network_sim_list[:iter+1], gradncc_sim_list[:iter+1], rtvec_diff_list[:iter+1], [], [], iter_switch)
+    
+    # Create animation from saved figures
+    print("\nGenerating animation from saved figures...")
+    create_video_from_figs(SAVE_PATH, test_id)
+    print(f"Animation created at {SAVE_PATH}/movie/animation_{test_id}.mp4")
+
+    # Save stored variables for further analysis if needed
+    print("\nSaving stored variables...")
+    variables_dir = os.path.join(SAVE_PATH, 'stored_variables')
+    if not os.path.exists(variables_dir):
+        os.makedirs(variables_dir)
+        print(f"Created directory: {variables_dir}")
+    
+    # Save variables to disk
+    torch.save({
+        'proj_mov': stored_proj_mov,
+        'rtvec': stored_rtvec,
+        'encode_mov': stored_encode_mov,
+        'encode_tar': stored_encode_tar,
+        'network_sim_list': network_sim_list,
+        'gradncc_sim_list': gradncc_sim_list,
+        'rtvec_diff_list': rtvec_diff_list,
+    }, os.path.join(variables_dir, f'variables_{test_id}.pt'))
+    print(f"Variables saved to {variables_dir}/variables_{test_id}.pt")
 
 
 if __name__ == "__main__":
