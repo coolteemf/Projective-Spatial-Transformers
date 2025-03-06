@@ -1,0 +1,10 @@
+[build-system]
+requires = ["setuptools>=42.0.0", "wheel", "torch>=1.0.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "ProSTGrid"
+version = "0.1.0"
+description = "Projective Spatial Transformers"
+requires-python = ">=3.6"
+
