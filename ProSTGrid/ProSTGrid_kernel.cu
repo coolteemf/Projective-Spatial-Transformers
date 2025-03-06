@@ -86,7 +86,7 @@ torch::Tensor ProST_grid_generator_5D_cuda_forward(
     const dim3 dimBlock(dimx, dimy);
     const dim3 dimGrid((int)ceil(H/dimBlock.x), (int)ceil(W/dimBlock.y));
 
-    AT_DISPATCH_FLOATING_TYPES(ProST_grid.type(), "ProST_grid_generator_5D_cuda_forward", ([&] {
+    AT_DISPATCH_FLOATING_TYPES(ProST_grid.scalar_type(), "ProST_grid_generator_5D_cuda_forward", ([&] {
     make_ProST_grid_5D_kernel<scalar_t><<<dimGrid, dimBlock>>>(
         ProST_grid.packed_accessor<scalar_t, 5, torch::RestrictPtrTraits,size_t>(),
         range.packed_accessor<scalar_t, 1, torch::RestrictPtrTraits,size_t>(),

@@ -11,7 +11,7 @@
 #include <math.h> 
 
 // NOTE: AT_ASSERT has become AT_CHECK on master after 0.4.
-#define CHECK_CUDA(x) AT_ASSERTM(x.type().is_cuda(), #x " must be a CUDA tensor")
+#define CHECK_CUDA(x) AT_ASSERTM(x.device().is_cuda(), #x " must be a CUDA tensor")
 #define CHECK_CONTIGUOUS(x) AT_ASSERTM(x.is_contiguous(), #x " must be contiguous")
 #define CHECK_INPUT(x) CHECK_CUDA(x); CHECK_CONTIGUOUS(x)
 
@@ -91,7 +91,7 @@ torch::Tensor ProST_grid_generator_5D_cuda_forward(
 
 torch::Tensor ProST_grid_generator_forward(const torch::Tensor &theta, torch::IntArrayRef size, float dist_min, float dist_max, float src, float det, float pix_spacing, float step_size, bool align_corners) {
   /* Check device type */
-  if(theta.type().is_cuda()){
+  if(theta.device().is_cuda()){
     return ProST_grid_generator_5D_cuda_forward(theta, size[0], size[1], size[2], size[3], dist_min, dist_max, src, det, pix_spacing, step_size, align_corners);
   }else{
     return ProST_grid_generator_5D_cpu_forward(theta, size[0], size[1], size[2], size[3], dist_min, dist_max, src, det, pix_spacing, step_size, align_corners);
