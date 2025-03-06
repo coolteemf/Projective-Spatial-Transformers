@@ -8,7 +8,7 @@ setup(
             'ProSTGrid.cpp',
             'ProSTGrid_kernel.cu',
         ],
-        extra_compile_args={"nvcc": ["-ccbin=/usr/local/cuda/bin/gcc"]}
+        extra_compile_args={"nvcc": ["-ccbin=/usr/bin/gcc"]}
                       ),
     ],
     cmdclass={
