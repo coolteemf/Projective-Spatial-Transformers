@@ -3,25 +3,40 @@ import os
 import numpy as np
 import cv2
 import glob
-
+import matplotlib
+matplotlib.use('Agg')  # Use non-interactive backend
 PI = 3.1415926
 
+def preprocess_plot_data(proj_mov, target, det_size, rtvec_diff_list, norm_factor):
+    # Batch process data for plotting
+    proj_mov_numpy = proj_mov[0,0,:,:].detach().cpu().numpy().reshape(det_size, det_size)
+    target_numpy = target[0,0,:,:].detach().cpu().numpy().reshape(det_size, det_size)
+    rtvec_diff_np = np.array(rtvec_diff_list)
+    rtvec_diff_np[:, :3] *= 180/PI  # Convert to degrees
+    rtvec_diff_np[:, 3:] *= norm_factor
+    return proj_mov_numpy, target_numpy, rtvec_diff_np
+
 def create_video_from_figs(SAVE_PATH, TEST_ID):
-    iterfig_dir = SAVE_PATH + '/movie/iterfigs_' + TEST_ID
-    img_array = []
-    for filename in sorted(glob.glob(iterfig_dir+'/*.jpg')):
-        img = cv2.imread(filename)
-        height, width, layers = img.shape
-        size = (width,height)
-        img_array.append(img)
-
-    movie_name = SAVE_PATH + '/movie/animation_' + TEST_ID + '.mp4'
-    out = cv2.VideoWriter(movie_name,cv2.VideoWriter_fourcc(*'mp4v'), 1, size)
-
-    for i in range(len(img_array)):
-        out.write(img_array[i])
-
-    out.release()
+    iterfig_dir = os.path.join(SAVE_PATH, 'movie', f'iterfigs_{TEST_ID}')
+    files = sorted(glob.glob(os.path.join(iterfig_dir, '*.jpg')))
+    if not files:
+        print("No image files found to create video")
+        return
+        
+    # Get dimensions from first image
+    img = cv2.imread(files[0])
+    height, width = img.shape[:2]
+    size = (width, height)
+    
+    movie_name = os.path.join(SAVE_PATH, 'movie', f'animation_{TEST_ID}.mp4')
+    out = cv2.VideoWriter(movie_name, cv2.VideoWriter_fourcc(*'mp4v'), 1, size)
+    
+    try:
+        for file in files:
+            img = cv2.imread(file)
+            out.write(img)
+    finally:
+        out.release()
 
 def plot_run_stat(SAVE_PATH, epoch, riem_dist_list, riem_dist_mean_list, mse_loss_list, riem_grad_loss_list, vecgrad_diff_list):
 
@@ -226,7 +241,7 @@ def plot_test_iter_comb(fig, proj_mov, proj_init_numpy0, target, det_size, norm_
 
     plt.show(block=False)
     plt.pause(0.5)
-    plt.clf()
+    fig.clf()
 
 def plot_test_iter(fig, proj_mov, proj_init_numpy0, target, det_size, norm_factor,\
                    network_sim_list, rtvec_diff_list, rtvec_grad_list, riem_grad_list):
@@ -293,7 +308,7 @@ def plot_test_iter(fig, proj_mov, proj_init_numpy0, target, det_size, norm_facto
 
     plt.show(block=False)
     plt.pause(1)
-    plt.clf()
+    fig.clf()
 
 def plot_example_regi(fig, proj_mov, proj_init_numpy0, target, det_size, norm_factor,\
                    gradncc_sim_list, rtvec_diff_list):
@@ -349,7 +364,7 @@ def plot_example_regi(fig, proj_mov, proj_init_numpy0, target, det_size, norm_fa
 
     plt.show(block=False)
     plt.pause(1)
-    plt.clf()
+    fig.clf()
 
 def plot_realtest_iter(fig, proj_mov, proj_init_numpy0, target, det_size, norm_factor,\
                    network_sim_list, rtvec_diff_list, rtvec_grad_list, riem_grad_list):
@@ -381,7 +396,7 @@ def plot_realtest_iter(fig, proj_mov, proj_init_numpy0, target, det_size, norm_f
 
     plt.show(block=False)
     plt.pause(1)
-    plt.clf()
+    fig.clf()
 
 
 def save_test_animation(fig, SAVE_PATH, iter, TEST_ID, proj_mov, proj_init_numpy0, target, det_size, norm_factor,\
@@ -435,31 +450,29 @@ def save_test_animation(fig, SAVE_PATH, iter, TEST_ID, proj_mov, proj_init_numpy
     ax5.tick_params(axis='y', labelcolor='tab:blue')
 
     iterfig_dir = SAVE_PATH + '/movie/iterfigs_' + TEST_ID
-    if not os.path.exists(iterfig_dir):
-        os.mkdir(iterfig_dir)
+    didnt_exist = not os.path.exists(iterfig_dir)
+    os.makedirs(iterfig_dir, exist_ok=True)
+    if didnt_exist:
         print("Folder ", iterfig_dir, " Created")
-    else:
-        print("Folder ", iterfig_dir, " already exists")
 
     plt.savefig(iterfig_dir + '/Fig'+str(iter).zfill(4)+'.jpg')
 
 def save_test_animation_comb(fig, SAVE_PATH, iter, TEST_ID, proj_mov, proj_init_numpy0, target, det_size, norm_factor,\
                    network_sim_list, ncc_sim_list, rtvec_diff_list, rtvec_grad_list, riem_grad_list, switch=False):
+    # Preprocess data efficiently
     riem_grad_list_np = np.array(riem_grad_list)
     rtvec_grad_list_np = np.array(rtvec_grad_list)
     network_sim_list_np = np.array(network_sim_list)
-    network_sim_STD = np.std(network_sim_list_np[-10:])
+    network_sim_STD = np.std(network_sim_list_np[-10:] if len(network_sim_list_np) > 10 else network_sim_list_np)
     ncc_sim_list_np = np.array(ncc_sim_list)
-    rtvec_diff_list_np = np.array(rtvec_diff_list)
-
-    rtvec_diff_list_np[:, :3] = rtvec_diff_list_np[:, :3] * 180/PI
-    rtvec_diff_list_np[:, 3:] = rtvec_diff_list_np[:, 3:] * norm_factor
-
-
-    proj_mov_numpy0 = np.array(proj_mov[0,0,:,:].data.cpu())
-    target_numpy0 = np.array((target[0,0,:,:]).data.cpu())
-    proj_mov_numpy0 = proj_mov_numpy0.reshape((det_size , det_size))
-    target_numpy0 = target_numpy0.reshape((det_size , det_size))
+    
+    # Use helper function for data preprocessing
+    proj_mov_numpy0, target_numpy0, rtvec_diff_list_np = preprocess_plot_data(
+        proj_mov, target, det_size, rtvec_diff_list, norm_factor
+    )
+    
+    # Clear the figure before plotting
+    fig.clf()
 
     ax1 = fig.add_subplot(241)
     ax2 = fig.add_subplot(242)
@@ -518,13 +531,15 @@ def save_test_animation_comb(fig, SAVE_PATH, iter, TEST_ID, proj_mov, proj_init_
 
     iterfig_dir = SAVE_PATH + '/movie/iterfigs_' + TEST_ID
     if iter == 0:
-        if not os.path.exists(iterfig_dir):
-            os.mkdir(iterfig_dir)
+        didnt_exist = not os.path.exists(iterfig_dir)
+        os.makedirs(iterfig_dir, exist_ok=True)
+        if didnt_exist:
             print("Folder ", iterfig_dir, " Created")
-        else:
-            print("Folder ", iterfig_dir, " already exists")
 
-    plt.savefig(iterfig_dir + '/Fig'+str(iter).zfill(4)+'.jpg')
+    # Save figure with optimized settings
+    plt.savefig(iterfig_dir + '/Fig'+str(iter).zfill(4)+'.jpg', dpi=100, bbox_inches='tight')
+    
+    # No need to clear the figure here since it's already cleared at the beginning of the function
 
 
 def save_realtest_animation(fig, SAVE_PATH, iter, TEST_ID, proj_mov, proj_init_numpy0, target, det_size, norm_factor,\
@@ -558,11 +573,10 @@ def save_realtest_animation(fig, SAVE_PATH, iter, TEST_ID, proj_mov, proj_init_n
 
     iterfig_dir = SAVE_PATH + '/movie/iterfigs_' + TEST_ID
     if iter == 0:
-        if not os.path.exists(iterfig_dir):
-            os.mkdir(iterfig_dir)
+        didnt_exist = not os.path.exists(iterfig_dir)
+        os.makedirs(iterfig_dir, exist_ok=True)
+        if didnt_exist:
             print("Folder ", iterfig_dir, " Created")
-        else:
-            print("Folder ", iterfig_dir, " already exists")
 
     plt.savefig(iterfig_dir + '/Fig'+str(iter).zfill(4)+'.jpg')
 
@@ -621,11 +635,10 @@ def save_realtest_animation_comb(fig, SAVE_PATH, iter, TEST_ID, proj_mov, proj_i
 
     iterfig_dir = SAVE_PATH + '/movie/iterfigs_' + TEST_ID
     if iter == 0:
-        if not os.path.exists(iterfig_dir):
-            os.mkdir(iterfig_dir)
+        didnt_exist = not os.path.exists(iterfig_dir)
+        os.makedirs(iterfig_dir, exist_ok=True)
+        if didnt_exist:
             print("Folder ", iterfig_dir, " Created")
-        else:
-            print("Folder ", iterfig_dir, " already exists")
 
     plt.savefig(iterfig_dir + '/Fig'+str(iter).zfill(4)+'.jpg')
 
@@ -779,13 +792,14 @@ def save_vali_iter(SAVE_PATH, epoch, idx, proj_mov, proj_init_numpy0, target, de
 
     vali_epoch_dir = SAVE_PATH + '/stat_figs/vali_epoch'+str(epoch)
     if not os.path.exists(vali_epoch_dir):
-        os.mkdir(vali_epoch_dir)
-        print("Folder ", vali_epoch_dir, " Created")
-    else:
-        print("Folder ", vali_epoch_dir, " already exists")
+        didnt_exist = not os.path.exists(vali_epoch_dir)
+        os.makedirs(vali_epoch_dir, exist_ok=True)
+        if didnt_exist:
+            print("Folder ", vali_epoch_dir, " Created")
     vali_epoch_name = vali_epoch_dir + '/Fig_idx' + str(idx) + '.jpg'
-    plt.savefig(vali_epoch_name)
-    plt.close(fig)
+    plt.savefig(vali_epoch_name, dpi=100, bbox_inches='tight')
+    fig.clf()
+    del fig  # Explicitly free memory
 
 
 '''

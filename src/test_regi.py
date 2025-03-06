@@ -35,6 +35,8 @@ MANUAL_TEST = False
 parser = argparse.ArgumentParser(description='Registration network for 3D-2D image alignment')
 parser.add_argument('--no-timing', action='store_true', 
                     help='Disable timing measurements and timing-related output (default: timing enabled)')
+parser.add_argument('--plot-frequency', type=int, default=1,
+                    help='Generate plots every N iterations (default: 1)')
 args = parser.parse_args()
 
 # Set timing flag based on command line argument
@@ -255,7 +257,14 @@ def train():
 
     # Generate all visualizations in a separate loop with progress bar
     print("\nGenerating visualizations...")
-    for iter in tqdm(range(len(stored_proj_mov)), desc="Generating plots"):
+    total_iters = len(stored_proj_mov)
+    plot_freq = args.plot_frequency
+    
+    # Ensure we always plot the first and last iterations
+    iters_to_plot = set([i for i in range(0, total_iters, plot_freq)] + [0, total_iters - 1])
+    iters_to_plot = sorted(list(iters_to_plot))
+    
+    for iter in tqdm(iters_to_plot, desc=f"Generating plots (every {plot_freq} iterations)"):
         # Get the data for this iteration
         proj_mov = stored_proj_mov[iter]
         rtvec = stored_rtvec[iter]
