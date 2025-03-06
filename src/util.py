@@ -224,7 +224,13 @@ def input_param(CT_PATH, SEG_PATH, BATCH_SIZE, ISFlip = False, zRot90 = False, p
     return param, det_size, _3D_vol, CT_vol, ray_proj_mov, corner_pt, norm_factor
 
 def input_param_test(SEG_PATH, BATCH_SIZE, ISFlip = False, zRot90 = False, 
-                     pix_spacing = 2.92, step_size = 1.75, iso_center = 400, norm_ct = False, device='cuda'):
+                     pix_spacing = 2.92, 
+                     step_size = 1.75, 
+                     iso_center = 400,
+                     src_det = 1483.39,
+                     det_size = 128,
+                     norm_ct = False, 
+                     device='cuda'):
     _3D_vol_nib = nib.load(SEG_PATH)
     _3D_vol = np.asanyarray(_3D_vol_nib.dataobj)
 
@@ -244,9 +250,6 @@ def input_param_test(SEG_PATH, BATCH_SIZE, ISFlip = False, zRot90 = False,
     if norm_ct:
         _3D_vol = (_3D_vol - np.min(_3D_vol)) / (np.max(_3D_vol) - np.min(_3D_vol))
 
-    # Pre-defined hard coded geometry
-    src_det = 1483.39
-    det_size = 128
     # vol_size = CT_vol.shape[0]
     depth, height, width = _3D_vol.shape
 
