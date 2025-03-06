@@ -6,6 +6,7 @@ import torch.nn as nn
 import torch.optim as optim
 import matplotlib.pyplot as plt
 import time
+import argparse
 
 import numpy as np
 from torch.optim.lr_scheduler import StepLR, CyclicLR
@@ -27,6 +28,15 @@ ITER_STEPS = 500
 
 MANUAL_TEST = False
 
+# Parse command line arguments
+parser = argparse.ArgumentParser(description='Registration network for 3D-2D image alignment')
+parser.add_argument('--no-timing', action='store_true', 
+                    help='Disable timing measurements and timing-related output (default: timing enabled)')
+args = parser.parse_args()
+
+# Set timing flag based on command line argument
+ENABLE_TIMING = not args.no_timing
+
 SE3_GROUP = SpecialEuclidean(n=3)
 METRIC = SE3_GROUP.default_metric()
 
@@ -47,26 +57,35 @@ zFlip = False
 RESUME_MODEL = SAVE_PATH+'/pretrain.pt'
 
 def train():
-    start_time_total = time.time()
+    if ENABLE_TIMING:
+        start_time_total = time.time()
     criterion_mse = nn.MSELoss()
     criterion_gradncc = gradncc
     
     print("Starting data preparation...")
-    start_time_data_prep = time.time()
+    if ENABLE_TIMING:
+        start_time_data_prep = time.time()
     param, det_size, _3D_vol, ray_proj_mov, corner_pt, norm_factor = input_param_test(SEG_PATH, BATCH_SIZE, VOX_SPAC, zFlip,
                                                                                       pix_spacing=PIX_SPAC, device=device)
-    data_prep_time = time.time() - start_time_data_prep
-    print(f"Data preparation completed in {data_prep_time:.4f} seconds")
+    if ENABLE_TIMING:
+        data_prep_time = time.time() - start_time_data_prep
+        print(f"Data preparation completed in {data_prep_time:.4f} seconds")
+    else:
+        print("Data preparation completed")
 
     print("Starting model loading...")
-    start_time_model_loading = time.time()
+    if ENABLE_TIMING:
+        start_time_model_loading = time.time()
     initmodel = ProST_init(param).to(device)
     model = RegiNet(param, det_size).to(device)
 
     checkpoint = torch.load(RESUME_MODEL)
     model.load_state_dict(checkpoint['state_dict'])
-    model_loading_time = time.time() - start_time_model_loading
-    print(f"Model loading completed in {model_loading_time:.4f} seconds")
+    if ENABLE_TIMING:
+        model_loading_time = time.time() - start_time_model_loading
+        print(f"Model loading completed in {model_loading_time:.4f} seconds")
+    else:
+        print("Model loading completed")
 
 
     model.eval()
@@ -77,7 +96,8 @@ def train():
 
      # Get target  projection
     print("Starting target projection preparation...")
-    start_time_target_prep = time.time()
+    if ENABLE_TIMING:
+        start_time_target_prep = time.time()
     if MANUAL_TEST:
         manual_rtvec_gt= np.array([[0,0,0,0,0,0]])
         manual_rtvec_smp= np.array([[-0.2, 0.3, 0.6, -0.1, 0.25, 0.2]])
@@ -100,8 +120,11 @@ def train():
         max_tar, _ = torch.max(target.reshape(BATCH_SIZE, -1), dim=-1, keepdim=True)
         target = (target.reshape(BATCH_SIZE, -1) - min_tar) / (max_tar - min_tar)
         target = target.reshape(BATCH_SIZE, 1, det_size, det_size)
-    target_prep_time = time.time() - start_time_target_prep
-    print(f"Target projection preparation completed in {target_prep_time:.4f} seconds")
+    if ENABLE_TIMING:
+        target_prep_time = time.time() - start_time_target_prep
+        print(f"Target projection preparation completed in {target_prep_time:.4f} seconds")
+    else:
+        print("Target projection preparation completed")
 
     optimizer_net = optim.SGD([rtvec], lr=lr_net, momentum=0.9)
     optimizer_gradncc = optim.SGD([rtvec], lr=lr_gradncc, momentum=0.9)
@@ -114,12 +137,14 @@ def train():
 
     stop = False
     switch = False
-    total_forward_time = 0
-    total_backward_time = 0
+    if ENABLE_TIMING:
+        total_forward_time = 0
+        total_backward_time = 0
     
-    print("Starting training iterations...")
+    print("Starting iterations...")
     for iter in range(ITER_STEPS):
-        iter_start_time = time.time()
+        if ENABLE_TIMING:
+            iter_start_time = time.time()
         
         if not switch:
             if iter > 10:
@@ -135,10 +160,12 @@ def train():
             break
 
         # Do Projection
-        forward_start_time = time.time()
+        if ENABLE_TIMING:
+            forward_start_time = time.time()
         encode_mov, encode_tar, proj_mov = model(_3D_vol, target, rtvec, corner_pt)
-        forward_time = time.time() - forward_start_time
-        total_forward_time += forward_time
+        if ENABLE_TIMING:
+            forward_time = time.time() - forward_start_time
+            total_forward_time += forward_time
 
         optimizer_net.zero_grad()
         optimizer_gradncc.zero_grad()
@@ -152,15 +179,17 @@ def train():
         gradncc_sim_list.append(gradncc_loss.item())
 
         rtvec.retain_grad()
-        backward_start_time = time.time()
+        if ENABLE_TIMING:
+            backward_start_time = time.time()
         if switch:
             gradncc_loss.backward()
             scheduler_gradncc.step()
         else:
             l2_loss.backward()
             #scheduler_net.step()
-        backward_time = time.time() - backward_start_time
-        total_backward_time += backward_time
+        if ENABLE_TIMING:
+            backward_time = time.time() - backward_start_time
+            total_backward_time += backward_time
 
         rtvec_diff = rtvec.detach().cpu()[0,:]-rtvec_gt.detach().cpu()[0,:]
         rtvec_diff_list.append(rtvec_diff.detach().cpu().numpy())
@@ -172,19 +201,27 @@ def train():
 
         if iter == 0:
             proj_init_numpy0 = np.array(proj_mov[0,0,:,:].data.cpu())
-
         # plot_test_iter_comb(fig, proj_mov, proj_init_numpy0, target, det_size, norm_factor,\
         #        network_sim_list, gradncc_sim_list, rtvec_diff_list, switch)
-
-    total_time = time.time() - start_time_total
-    print("\n--- Timing Summary ---")
-    print(f"Total execution time: {total_time:.4f} seconds")
-    print(f"Data preparation time: {data_prep_time:.4f} seconds")
-    print(f"Model loading time: {model_loading_time:.4f} seconds")
-    print(f"Target preparation time: {target_prep_time:.4f} seconds")
-    print(f"Total forward pass time: {total_forward_time:.4f} seconds (avg: {total_forward_time/max(1, iter+1):.4f}s per iteration)")
-    print(f"Total backward pass time: {total_backward_time:.4f} seconds (avg: {total_backward_time/max(1, iter+1):.4f}s per iteration)")
-    print("----------------------")
+        if ENABLE_TIMING:
+            print(f"Iteration {iter} completed in {time.time() - iter_start_time:.4f} seconds")
+            print(f"Forward pass time: {forward_time:.4f} seconds")
+            print(f"Backward pass time: {backward_time:.4f} seconds")
+        else:
+            if iter % 10 == 0:
+                print(f"Iteration {iter} completed")
+    if ENABLE_TIMING:
+        total_time = time.time() - start_time_total
+        print("\n--- Timing Summary ---")
+        print(f"Total execution time: {total_time:.4f} seconds")
+        print(f"Data preparation time: {data_prep_time:.4f} seconds")
+        print(f"Model loading time: {model_loading_time:.4f} seconds")
+        print(f"Target preparation time: {target_prep_time:.4f} seconds")
+        print(f"Total forward pass time: {total_forward_time:.4f} seconds (avg: {total_forward_time/max(1, iter+1):.4f}s per iteration)")
+        print(f"Total backward pass time: {total_backward_time:.4f} seconds (avg: {total_backward_time/max(1, iter+1):.4f}s per iteration)")
+        print("----------------------")
+    else:
+        print("\n Completed")
 
 
 if __name__ == "__main__":
