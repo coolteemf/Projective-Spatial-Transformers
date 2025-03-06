@@ -8,3 +8,6 @@ ProSTGrid/ProSTGrid.egg-info/*
 */.ipynb_checkpoints
 */.pytest_cache
 .python-version
+*.jpg
+*.mp4
+variables_*.pt
