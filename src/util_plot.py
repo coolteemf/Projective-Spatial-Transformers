@@ -16,27 +16,73 @@ def preprocess_plot_data(proj_mov, target, det_size, rtvec_diff_list, norm_facto
     rtvec_diff_np[:, 3:] *= norm_factor
     return proj_mov_numpy, target_numpy, rtvec_diff_np
 
-def create_video_from_figs(SAVE_PATH, TEST_ID):
+def create_video_from_figs(SAVE_PATH, TEST_ID, fps=0.5, quality=95):
+    """
+    Creates a video from a sequence of figure images with improved quality settings.
+    
+    Parameters:
+    -----------
+    SAVE_PATH : str
+        Base directory where movies and exported frames will be saved
+    TEST_ID : str
+        Identifier for the test, used in file and directory naming
+    fps : float, optional
+        Frames per second for the output video (default: 0.5)
+        Lower values create slower playback for better frame viewing
+    quality : int, optional
+        Video quality (0-100), higher values mean better quality (default: 95)
+        This value is used to set the video bitrate (higher quality = higher bitrate)
+    export_frames : bool, optional
+        If True, also exports individual frames to a separate folder for individual viewing (default: False)
+    
+    Returns:
+    --------
+    str
+        Path to the created video file
+    """
     iterfig_dir = os.path.join(SAVE_PATH, 'movie', f'iterfigs_{TEST_ID}')
     files = sorted(glob.glob(os.path.join(iterfig_dir, '*.jpg')))
     if not files:
         print("No image files found to create video")
-        return
+        return None
         
     # Get dimensions from first image
     img = cv2.imread(files[0])
     height, width = img.shape[:2]
     size = (width, height)
     
-    movie_name = os.path.join(SAVE_PATH, 'movie', f'animation_{TEST_ID}.mp4')
-    out = cv2.VideoWriter(movie_name, cv2.VideoWriter_fourcc(*'mp4v'), 1, size)
+    # Create output directory if it doesn't exist
+    movie_dir = os.path.join(SAVE_PATH, 'movie')
+    os.makedirs(movie_dir, exist_ok=True)
+    
+    # Set up video writer with better codec and quality settings
+    movie_name = os.path.join(movie_dir, f'animation_{TEST_ID}.mp4')
+    fourcc = cv2.VideoWriter_fourcc(*'MP4V')
+    out = cv2.VideoWriter(movie_name, fourcc, fps, size)
+    
+    # Calculate bitrate based on quality (0-100)
+    # Higher quality means higher bitrate (in kb/s)
+    # Reasonable range: 1000 kb/s (low quality) to 8000 kb/s (high quality)
+    bitrate = int(1000 + (quality / 100.0) * 7000)
+    # Set the bitrate for the VideoWriter
+    out.set(cv2.CAP_PROP_BITRATE, bitrate)
+    
+    print(f"Creating video with bitrate: {bitrate} kb/s (quality: {quality}/100)")
     
     try:
-        for file in files:
-            img = cv2.imread(file)
+        for i, file in enumerate(files):
+            img = cv2.imread(file)            
+            # Write frame to video
             out.write(img)
+    except Exception as e:
+        print(f"Error creating video: {e}")
+        return None
     finally:
         out.release()
+    
+    print(f"Video saved to {movie_name}")
+    return movie_name
+
 
 def plot_run_stat(SAVE_PATH, epoch, riem_dist_list, riem_dist_mean_list, mse_loss_list, riem_grad_loss_list, vecgrad_diff_list):
 
