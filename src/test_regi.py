@@ -48,7 +48,10 @@ METRIC = SE3_GROUP.default_metric()
 # CT_PATH = '/home/francois/Projects/data/raw_data/4D_Liver_paired/42 CT VPCT  DynMulti4D  0.6  B20f - 38 frames Volume Sequence by AcquisitionTime 16.nii.gz'
 SEG_PATH = '/home/francois/Projects/data/raw_data/4D_Liver_paired/42VPCT_16_bonemask_resample2.nii.gz'
 VOX_SPAC = 0.7421875
-PIX_SPAC = 0.388
+PIX_SPAC = 0.388 * 768/ 128
+SRC_DET_DIST = 1500
+DET_SIZE = 128
+ISO_CENTER = 1050
 
 SAVE_PATH = '/home/francois/Projects/Projective-Spatial-Transformers/data/save_model'
 RESUME_EPOCH = 90
@@ -71,7 +74,11 @@ def train():
     if ENABLE_TIMING:
         start_time_data_prep = time.time()
     param, det_size, _3D_vol, ray_proj_mov, corner_pt, norm_factor = input_param_test(SEG_PATH, BATCH_SIZE, VOX_SPAC, zFlip,
-                                                                                      pix_spacing=PIX_SPAC, device=device)
+                                                                                      pix_spacing=PIX_SPAC, 
+                                                                                      iso_center=ISO_CENTER,
+                                                                                      src_det=SRC_DET_DIST,
+                                                                                      det_size=DET_SIZE,
+                                                                                      device=device)
     if ENABLE_TIMING:
         data_prep_time = time.time() - start_time_data_prep
         print(f"Data preparation completed in {data_prep_time:.4f} seconds")
