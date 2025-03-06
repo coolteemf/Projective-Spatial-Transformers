@@ -27,7 +27,7 @@ device = torch.device("cuda")
 PI = 3.1415926
 NUM_PHOTON = 10000
 BATCH_SIZE = 1
-ITER_STEPS = 500
+ITER_STEPS = 40
 
 MANUAL_TEST = False
 
@@ -171,12 +171,12 @@ def train():
         if ENABLE_TIMING:
             iter_start_time = time.time()
         
-        if not switch:
-            if iter > 10:
-                network_sim_list_np = np.array(network_sim_list)
-                switch = np.std(network_sim_list_np[-10:]) < switch_trd
-            else:
-                switch = False
+        # if not switch:
+        #     if iter > 10:
+        #         network_sim_list_np = np.array(network_sim_list)
+        #         switch = np.std(network_sim_list_np[-10:]) < switch_trd
+        #     else:
+        #         switch = False
 
         if switch and iter>10:
             stop = np.std(gradncc_sim_list[-10:]) < stop_trd
